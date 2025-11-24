@@ -1,0 +1,17 @@
+//----------------------------------||TO DO||-----------------------------------------\\
+- Notifikácie - selfexplanatory (maybe dorobiť)
+- Štatistiky kto koľko práce urobil (Farbičky by mohli dobre fungovať)
+- Bezpečnosť (kontrola vstupov, hashovanie hesiel, ochrana pred SQL injection)
+
+
+
+TO DO OPTIONAL:
+- login via Google
+
+
+//----------------------------------||DONE||-----------------------------------------\\
+- "Moje skupiny" (zakladanie, úprava a mazanie skupín, pridávanie členov)
+- Schopnosť nahráť súbory aby ich moja skupina vedela vidieť. Probably mainly PDF
+- chat / správy   nebude stačiť Feed ??? (Stačil Feed)
+- "Moje práce" (pridávanie, upravovanie a sledovanie stavu úloh (OPEN / IN PROGRESS / DONE).
+- "Termíny" (definovanie deadlinov, pripomienky na blížiace sa úlohy)
