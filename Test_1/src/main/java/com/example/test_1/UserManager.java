@@ -7,44 +7,68 @@ public class UserManager {
 
     public UserManager() {}
 
+    //Update na server
     public boolean register(String username, String password) {
-        try (Connection conn = DBManager.getConnection()) {
-            java.util.Random rand = new java.util.Random();
-            int newId = rand.nextInt(90000) + 10000;
-            String sql = "INSERT INTO users (username, password, name, email, age, photo, id) VALUES (?, ?, '', '', 0, '', ?)";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setString(1, username);
-            pstmt.setString(2, password);
-            pstmt.setInt(3, newId);
-            pstmt.executeUpdate();
-            return true;
-        } catch (SQLException e) {
+        try {
+            String jsonReq = "{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}";
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:8080/api/users/register"))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonReq))
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            return resp.statusCode() == 200;
+        } catch (Exception e) {
+            e.printStackTrace();
             return false;
         }
     }
 
-    public User login(String username, String password) {
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "SELECT * FROM users WHERE username = ? AND password = ?";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setString(1, username);
-            pstmt.setString(2, password);
-            ResultSet rs = pstmt.executeQuery();
 
-            if (rs.next()) {
-                User user = new User(rs.getString("username"), password);
-                user.setName(rs.getString("name"));
-                user.setEmail(rs.getString("email"));
-                user.setAge(rs.getInt("age"));
-                user.setPhotoPath(rs.getString("photo"));
-                user.setId(rs.getInt("id"));
-                return user;
-            }
-        } catch (SQLException e) {
+    //Update na server
+    public User login(String username, String password) {
+        try {
+            String jsonReq = "{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}";
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:8080/api/users/login"))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonReq))
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (resp.statusCode() != 200) return null;
+
+            String body = resp.body();
+            int id = extractInt(body, "\"id\":");
+            String uname = extractString(body, "\"username\":\"");
+            String name = extractString(body, "\"name\":\"");
+            String email = extractString(body, "\"email\":\"");
+            int age = extractInt(body, "\"age\":");
+            String photo = extractString(body, "\"photoPath\":\""); // podľa UserDto
+
+            User user = new User(uname, password);
+            user.setId(id);
+            user.setName(name);
+            user.setEmail(email);
+            user.setAge(age);
+            user.setPhotoPath(photo);
+            return user;
+
+        } catch (Exception e) {
             e.printStackTrace();
+            return null;
         }
-        return null;
     }
+
 
     public boolean saveUser(User user) {
         try (Connection conn = DBManager.getConnection()) {
@@ -442,6 +466,26 @@ public class UserManager {
         } catch (Exception e) { e.printStackTrace(); }
         return events;
     }
+
+    private int extractInt(String json, String key) {
+        int idx = json.indexOf(key);
+        if (idx < 0) return 0;
+        idx += key.length();
+        int end = idx;
+        while (end < json.length() && (Character.isDigit(json.charAt(end)) || json.charAt(end) == '-')) end++;
+        try { return Integer.parseInt(json.substring(idx, end)); }
+        catch (Exception e) { return 0; }
+    }
+
+    private String extractString(String json, String key) {
+        int idx = json.indexOf(key);
+        if (idx < 0) return "";
+        idx += key.length();
+        int end = json.indexOf("\"", idx);
+        if (end < 0) return "";
+        return json.substring(idx, end);
+    }
+
 
 
 }
