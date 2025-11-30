@@ -6,6 +6,8 @@ import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.scene.text.Font;
 import javafx.scene.paint.Color;
+
+import java.time.LocalDate;
 import java.util.*;
 
 public class MojePracePane extends VBox {
@@ -50,7 +52,6 @@ public class MojePracePane extends VBox {
 
         getChildren().addAll(topBar, mainPane);
         showJobList();
-
     }
 
     private void showJobList() {
@@ -114,7 +115,6 @@ public class MojePracePane extends VBox {
         // Ľavý panel – popis práce + editor
         VBox leftCol = new VBox(22);
 
-        // Popis práce
         VBox infoBox = new VBox(7);
         infoBox.getChildren().addAll(
                 infoLine("Popis:", job.description),
@@ -123,7 +123,6 @@ public class MojePracePane extends VBox {
                 infoLine("Vytvorené:", job.createdAt != null ? job.createdAt : "")
         );
 
-        // Editor práce
         Label workLabel = new Label("Úprava textu / nový prídavok k práci:");
         TextArea workArea = new TextArea();
         workArea.setPromptText("Sem napíš nový obsah, doplnenie, aktualizáciu s formátovaním");
@@ -163,7 +162,12 @@ public class MojePracePane extends VBox {
         backBtn.setStyle("-fx-background-radius:14; -fx-background-color:#dea477; -fx-text-fill:#fff;");
         backBtn.setOnAction(ev -> showJobList());
 
-        HBox logButtons = new HBox(10, submitBtn, backBtn);
+        // NOVÉ TLAČIDLO ŠTATISTIKY
+        Button statsBtn = new Button("Štatistiky");
+        statsBtn.setStyle("-fx-background-radius:14; -fx-background-color:#8bc34a; -fx-text-fill:#fff;");
+        statsBtn.setOnAction(ev -> showJobStats(job));
+
+        HBox logButtons = new HBox(10, submitBtn, backBtn, statsBtn);
         logButtons.setAlignment(Pos.CENTER_LEFT);
 
         VBox editorBox = new VBox(12, workLabel, workArea, commitLabel, commitField, uploadBtn, pdfLabel, logButtons);
@@ -174,7 +178,7 @@ public class MojePracePane extends VBox {
         GridPane.setVgrow(leftCol, Priority.ALWAYS);
         rootGrid.add(leftCol, 0, 0);
 
-        // Pravý panel – logy (v jednom stĺpci, scroll zhora nadol)
+        // Pravý panel – logy
         VBox logCol = new VBox(12);
         Label logsHdr = new Label("Logy práce / úpravy:");
         logsHdr.setFont(Font.font("Arial", 16));
@@ -189,7 +193,7 @@ public class MojePracePane extends VBox {
             VBox logCard = new VBox(10);
             logCard.setPadding(new Insets(9,11,9,11));
             logCard.setMinWidth(210);
-            logCard.setMaxWidth(580); // maximalne podla layoutu
+            logCard.setMaxWidth(580);
             logCard.setStyle("-fx-background-radius:18; -fx-background-color:#ffefdf; -fx-effect: dropshadow(gaussian, #e5b687, 6,0.10,0,2);");
             logCard.setAlignment(Pos.TOP_LEFT);
 
@@ -258,6 +262,92 @@ public class MojePracePane extends VBox {
         rootGrid.getColumnConstraints().addAll(col1, col2);
 
         mainPane.getChildren().setAll(rootGrid);
+    }
+
+    // ŠTATISTIKY práce
+    private void showJobStats(Job job) {
+        List<JobLog> logs = userManager.getJobLogs(job.id);
+        if (logs.isEmpty()) {
+            new Alert(Alert.AlertType.INFORMATION, "K tejto práci zatiaľ nie sú žiadne záznamy.").showAndWait();
+            return;
+        }
+
+        // 1) Aggregate "work" by user
+        Map<String, Integer> workByUser = new LinkedHashMap<>();
+        for (JobLog log : logs) {
+            String name = log.authorName != null ? log.authorName : ("ID " + log.userId);
+            int weight = 0;
+            if (log.workText != null) weight += log.workText.length();
+            if (log.commitMsg != null) weight += log.commitMsg.length() * 2;
+            if (weight == 0) weight = 10;
+            workByUser.merge(name, weight, Integer::sum);
+        }
+
+        int total = workByUser.values().stream().mapToInt(i -> i).sum();
+
+        Dialog<Void> dialog = new Dialog<>();
+        dialog.setTitle("Štatistiky práce");
+        dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+
+        VBox content = new VBox(10);
+        content.setPadding(new Insets(16));
+        Label title = new Label("Rozdelenie práce pre: " + job.title);
+        title.setFont(Font.font("Arial", 16));
+        title.setStyle("-fx-font-weight: bold; -fx-text-fill: #5d4037;");
+
+        VBox barsBox = new VBox(8);
+
+        String[] colors = {"#ff7043","#42a5f5","#66bb6a","#ffca28","#ab47bc","#26a69a","#ef5350","#8d6e63"};
+        int idx = 0;
+
+        double maxWidth = 220; // 100 % šírka
+
+        for (Map.Entry<String,Integer> entry : workByUser.entrySet()) {
+            String name = entry.getKey();
+            int value = entry.getValue();
+            double percent = (total == 0) ? 0 : (value * 100.0 / total);
+
+            HBox row = new HBox(8);
+            row.setAlignment(Pos.CENTER_LEFT);
+
+            Label nameLbl = new Label(name + String.format(" – %.1f%%", percent));
+            nameLbl.setPrefWidth(170);
+            nameLbl.setFont(Font.font("Arial", 13));
+
+            // Pozadie
+            StackPane barBg = new StackPane();
+            barBg.setMinHeight(16);
+            barBg.setPrefWidth(maxWidth);
+            barBg.setMaxWidth(maxWidth);
+            barBg.setStyle("-fx-background-color:#f5f5f5; -fx-background-radius:8;");
+
+            // Farebný bar – dĺžka podľa percent
+            Region barFill = new Region();
+            double w = maxWidth * (percent / 100.0);
+            barFill.setMinWidth(0);
+            barFill.setPrefWidth(w);
+            barFill.setMaxWidth(Region.USE_PREF_SIZE); // DÔLEŽITÉ – aby sa neroztiahol na celé
+
+            barFill.setMinHeight(16);
+            String color = colors[idx % colors.length];
+            idx++;
+            barFill.setStyle("-fx-background-radius:8; -fx-background-color:" + color + ";");
+
+            barBg.getChildren().add(barFill);
+            StackPane.setAlignment(barFill, Pos.CENTER_LEFT);
+
+            row.getChildren().addAll(nameLbl, barBg);
+            barsBox.getChildren().add(row);
+        }
+
+
+        Label note = new Label("Odhad je vypočítaný z dĺžky textu logov a komentárov.");
+        note.setFont(Font.font("Arial", 11));
+        note.setStyle("-fx-text-fill:#757575;");
+
+        content.getChildren().addAll(title, new Separator(), barsBox, new Separator(), note);
+        dialog.getDialogPane().setContent(content);
+        dialog.showAndWait();
     }
 
     private void showJobEditor(Job job) {
