@@ -71,205 +71,356 @@ public class UserManager {
 
 
     public boolean saveUser(User user) {
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "UPDATE users SET name = ?, email = ?, age = ?, photo = ? WHERE username = ?";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setString(1, user.getName());
-            pstmt.setString(2, user.getEmail());
-            pstmt.setInt(3, user.getAge());
-            pstmt.setString(4, user.getPhotoPath());
-            pstmt.setString(5, user.getUsername());
-            int rowsUpdated = pstmt.executeUpdate();
-            return rowsUpdated > 0;
-        } catch (SQLException e) {
+        try {
+            String safeName = user.getName() == null ? "" : user.getName().replace("\"", "\\\"");
+            String safeEmail = user.getEmail() == null ? "" : user.getEmail().replace("\"", "\\\"");
+            String safePhoto = user.getPhotoPath() == null ? "" :
+                    user.getPhotoPath().replace("\\", "\\\\").replace("\"", "\\\"");
+
+            String jsonReq = String.format(
+                    "{\"id\":%d,\"username\":\"%s\",\"name\":\"%s\",\"email\":\"%s\",\"age\":%d,\"photoPath\":\"%s\"}",
+                    user.getId(),
+                    user.getUsername().replace("\"", "\\\""),
+                    safeName,
+                    safeEmail,
+                    user.getAge(),
+                    safePhoto
+            );
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:8080/api/users/save"))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonReq))
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            return resp.statusCode() == 200;
+        } catch (Exception e) {
             e.printStackTrace();
             return false;
         }
     }
 
-    // ZDIEĽANÉ SKUPINY – nájde všetky, ktorých je užívateľ členom alebo je vlastník
+
+    //Skupiny - prechod na server
     public List<Group> getUserGroups(String username) {
         List<Group> groups = new ArrayList<>();
-        try (Connection conn = DBManager.getConnection()) {
-            // najdi id usera podľa username
-            String sqlUser = "SELECT id FROM users WHERE username = ?";
-            PreparedStatement p = conn.prepareStatement(sqlUser);
-            p.setString(1, username);
-            ResultSet rs = p.executeQuery();
-            int uid = rs.next() ? rs.getInt("id") : -1;
+        try {
+            String url = "http://localhost:8080/api/groups?username=" +
+                    java.net.URLEncoder.encode(username, java.nio.charset.StandardCharsets.UTF_8);
 
-            // skupiny kde je user člen alebo vlastník (LEFT JOIN zabezpečí že vlastníctvo je vždy zahrnuté)
-            String sql = "SELECT DISTINCT g.* FROM groups g " +
-                    "LEFT JOIN group_members m ON g.id = m.group_id " +
-                    "WHERE g.owner = ? OR m.user_id = ?";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setString(1, username);
-            pstmt.setInt(2, uid);
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .GET()
+                    .build();
 
-            ResultSet groupsRs = pstmt.executeQuery();
-            while (groupsRs.next()) {
-                groups.add(new Group(groupsRs.getInt("id"),
-                        groupsRs.getString("name"),
-                        groupsRs.getString("owner")));
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (resp.statusCode() != 200) return groups;
+
+            String body = resp.body();
+
+            // veľmi jednoduchý parser bez knižnice – očakáva:
+            // [ {"id":1,"name":"...","owner":"..."}, {...} ]
+            String json = body.trim();
+            if (json.startsWith("[")) json = json.substring(1);
+            if (json.endsWith("]")) json = json.substring(0, json.length()-1);
+            if (json.isBlank()) return groups;
+
+            String[] items = json.split("\\},\\s*\\{");
+            for (String it : items) {
+                String obj = it;
+                if (!obj.startsWith("{")) obj = "{" + obj;
+                if (!obj.endsWith("}")) obj = obj + "}";
+
+                int id = extractInt(obj, "\"id\":");
+                String name = extractString(obj, "\"name\":\"");
+                String owner = extractString(obj, "\"owner\":\"");
+
+                groups.add(new Group(id, name, owner));
             }
+
         } catch (Exception e) {
             e.printStackTrace();
         }
         return groups;
     }
 
+
     public boolean addGroup(Group group) {
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "INSERT INTO groups (name, owner) VALUES (?,?)";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setString(1, group.name);
-            pstmt.setString(2, group.owner);
-            pstmt.executeUpdate();
-            return true;
-        } catch (SQLException e) {
+        try {
+            String jsonReq = String.format(
+                    "{\"id\":0,\"name\":\"%s\",\"owner\":\"%s\"}",
+                    group.name.replace("\"", "\\\""),
+                    group.owner.replace("\"", "\\\"")
+            );
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:8080/api/groups"))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonReq))
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            return resp.statusCode() == 200;
+        } catch (Exception e) {
             e.printStackTrace();
             return false;
         }
     }
+
 
     public boolean deleteGroup(int groupId) {
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "DELETE FROM groups WHERE id = ?";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setInt(1, groupId);
-            pstmt.executeUpdate();
-            // Odstrániť aj členstvá (čistota)
-            PreparedStatement pm = conn.prepareStatement("DELETE FROM group_members WHERE group_id = ?");
-            pm.setInt(1, groupId);
-            pm.executeUpdate();
-            return true;
-        } catch (SQLException e) {
+        try {
+            String url = "http://localhost:8080/api/groups/" + groupId;
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .DELETE()
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            return resp.statusCode() == 200;
+        } catch (Exception e) {
             e.printStackTrace();
             return false;
         }
     }
 
-    // Správne pracuje aj ak užívateľ je už člen v skupine (duplicitné členstvo ignoruje)
+
+
     public boolean addUserToGroup(int groupId, int userId) {
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?, ?)";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setInt(1, groupId);
-            pstmt.setInt(2, userId);
-            pstmt.executeUpdate();
-            return true;
-        } catch (SQLException e) {
+        try {
+            String jsonReq = String.format(
+                    "{\"groupId\":%d,\"userId\":%d}",
+                    groupId, userId
+            );
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:8080/api/groups/members"))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonReq))
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            return resp.statusCode() == 200;
+        } catch (Exception e) {
             e.printStackTrace();
             return false;
         }
     }
 
     public boolean removeUserFromGroup(int groupId, int userId) {
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "DELETE FROM group_members WHERE group_id = ? AND user_id = ?";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setInt(1, groupId);
-            pstmt.setInt(2, userId);
-            pstmt.executeUpdate();
-            return true;
-        } catch (SQLException e) {
+        try {
+            String jsonReq = String.format(
+                    "{\"groupId\":%d,\"userId\":%d}",
+                    groupId, userId
+            );
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:8080/api/groups/members"))
+                    .header("Content-Type", "application/json")
+                    .method("DELETE", java.net.http.HttpRequest.BodyPublishers.ofString(jsonReq))
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            return resp.statusCode() == 200;
+        } catch (Exception e) {
             e.printStackTrace();
             return false;
         }
     }
 
+
     public List<User> getGroupMembers(int groupId) {
         List<User> members = new ArrayList<>();
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "SELECT u.* FROM users u " +
-                    "JOIN group_members gm ON u.id = gm.user_id " +
-                    "WHERE gm.group_id = ?";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setInt(1, groupId);
-            ResultSet rs = pstmt.executeQuery();
-            while (rs.next()) {
-                User u = new User(rs.getString("username"), rs.getString("password"));
-                u.setName(rs.getString("name"));
-                u.setEmail(rs.getString("email"));
-                u.setAge(rs.getInt("age"));
-                u.setPhotoPath(rs.getString("photo"));
-                u.setId(rs.getInt("id"));
+        try {
+            String url = "http://localhost:8080/api/groups/" + groupId + "/members";
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .GET()
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (resp.statusCode() != 200) return members;
+
+            String json = resp.body().trim();
+            if (json.startsWith("[")) json = json.substring(1);
+            if (json.endsWith("]")) json = json.substring(0, json.length()-1);
+            if (json.isBlank()) return members;
+
+            String[] items = json.split("\\},\\s*\\{");
+            for (String it : items) {
+                String obj = it;
+                if (!obj.startsWith("{")) obj = "{" + obj;
+                if (!obj.endsWith("}")) obj = obj + "}";
+
+                int id = extractInt(obj, "\"id\":");
+                String username = extractString(obj, "\"username\":\"");
+                String name = extractString(obj, "\"name\":\"");
+                String email = extractString(obj, "\"email\":\"");
+                int age = extractInt(obj, "\"age\":");
+                String photo = extractString(obj, "\"photoPath\":\"");
+
+                User u = new User(username, "");
+                u.setId(id);
+                u.setName(name);
+                u.setEmail(email);
+                u.setAge(age);
+                u.setPhotoPath(photo);
                 members.add(u);
             }
-        } catch (SQLException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
         return members;
     }
 
+
     public User findUser(String value) {
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "SELECT * FROM users WHERE username = ? OR email = ? OR id = ?";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setString(1, value);
-            pstmt.setString(2, value);
-            try {
-                pstmt.setInt(3, Integer.parseInt(value));
-            } catch (NumberFormatException ex) {
-                pstmt.setInt(3, -1);
-            }
-            ResultSet rs = pstmt.executeQuery();
-            if (rs.next()) {
-                User user = new User(rs.getString("username"), rs.getString("password"));
-                user.setName(rs.getString("name"));
-                user.setEmail(rs.getString("email"));
-                user.setAge(rs.getInt("age"));
-                user.setPhotoPath(rs.getString("photo"));
-                user.setId(rs.getInt("id"));
-                return user;
-            }
-        } catch (SQLException e) {
+        try {
+            String url = "http://localhost:8080/api/users/find?value=" +
+                    java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .GET()
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (resp.statusCode() != 200) return null;
+
+            String body = resp.body(); // {"id":...,"username":"...","name":"...","email":"...","age":...,"photoPath":"..."}
+
+            int id = extractInt(body, "\"id\":");
+            String username = extractString(body, "\"username\":\"");
+            String name = extractString(body, "\"name\":\"");
+            String email = extractString(body, "\"email\":\"");
+            int age = extractInt(body, "\"age\":");
+            String photo = extractString(body, "\"photoPath\":\"");
+
+            User u = new User(username, ""); // heslo nepoznáme, netreba
+            u.setId(id);
+            u.setName(name);
+            u.setEmail(email);
+            u.setAge(age);
+            u.setPhotoPath(photo);
+            return u;
+
+        } catch (Exception e) {
             e.printStackTrace();
+            return null;
         }
-        return null;
     }
 
+
+    // ------ Feed správy ------
     // ------ Feed správy ------
     public boolean addFeedMessage(FeedMessage msg) {
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "INSERT INTO feed_messages (group_id, title, content, pdf_path, created_by) VALUES (?, ?, ?, ?, ?)";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setInt(1, msg.groupId);
-            pstmt.setString(2, msg.title);
-            pstmt.setString(3, msg.content);
-            pstmt.setString(4, msg.pdfPath);
-            pstmt.setInt(5, msg.createdBy);
-            pstmt.executeUpdate();
-            return true;
-        } catch (SQLException e) {
+        try {
+            String safeTitle = msg.title == null ? "" : msg.title.replace("\"", "\\\"");
+            String safeContent = msg.content == null ? "" : msg.content.replace("\"", "\\\"");
+            String safePdf = msg.pdfPath == null ? "" :
+                    msg.pdfPath
+                            .replace("\\", "\\\\")   // C:\cesta -> C:\\cesta
+                            .replace("\"", "\\\"");  // " -> \"
+
+            String jsonReq = String.format(
+                    "{\"id\":0,\"groupId\":%d,\"title\":\"%s\",\"content\":\"%s\",\"pdfPath\":\"%s\",\"createdBy\":%d}",
+                    msg.groupId,
+                    safeTitle,
+                    safeContent,
+                    safePdf,
+                    msg.createdBy
+            );
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:8080/api/feed"))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonReq))
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            return resp.statusCode() == 200;
+        } catch (Exception e) {
             e.printStackTrace();
             return false;
         }
     }
 
+
+
     public List<FeedMessage> getFeedMessages(int groupId) {
         List<FeedMessage> list = new ArrayList<>();
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "SELECT * FROM feed_messages WHERE group_id = ? ORDER BY created_at DESC";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setInt(1, groupId);
-            ResultSet rs = pstmt.executeQuery();
-            while (rs.next()) {
-                list.add(new FeedMessage(
-                        rs.getInt("id"),
-                        rs.getInt("group_id"),
-                        rs.getString("title"),
-                        rs.getString("content"),
-                        rs.getString("pdf_path"),
-                        rs.getInt("created_by"),
-                        rs.getString("created_at")
-                ));
+        try {
+            String url = "http://localhost:8080/api/feed?groupId=" + groupId;
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .GET()
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (resp.statusCode() != 200) return list;
+
+            String json = resp.body().trim();
+            if (json.startsWith("[")) json = json.substring(1);
+            if (json.endsWith("]")) json = json.substring(0, json.length()-1);
+            if (json.isBlank()) return list;
+
+            String[] items = json.split("\\},\\s*\\{");
+            for (String it : items) {
+                String obj = it;
+                if (!obj.startsWith("{")) obj = "{" + obj;
+                if (!obj.endsWith("}")) obj = obj + "}";
+
+                int id = extractInt(obj, "\"id\":");
+                int gId = extractInt(obj, "\"groupId\":");
+                String title = extractString(obj, "\"title\":\"");
+                String content = extractString(obj, "\"content\":\"");
+                String pdf = extractString(obj, "\"pdfPath\":\"");
+                int createdBy = extractInt(obj, "\"createdBy\":");
+                String createdAt = extractString(obj, "\"createdAt\":\"");
+
+                list.add(new FeedMessage(id, gId, title, content, pdf, createdBy, createdAt));
             }
-        } catch (SQLException e) {
+
+        } catch (Exception e) {
             e.printStackTrace();
         }
         return list;
     }
+
 
     public boolean addJob(Job job) {
         try (Connection conn = DBManager.getConnection()) {
