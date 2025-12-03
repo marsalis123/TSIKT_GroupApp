@@ -2,8 +2,6 @@ package com.example.test_1;
 
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.Node;
-import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.image.*;
 import javafx.scene.layout.*;
@@ -16,13 +14,16 @@ public class MainMenu extends BorderPane {
     private final MainApp app;
     private final User user;
     private final UserManager userManager;
-    private final List<Group> userGroups;
+    private List<Group> userGroups;
+
+    // Zvonček pre notifikácie
+    private NotificationBell notificationBell;
 
     public MainMenu(MainApp app, User user, UserManager userManager) {
         this.app = app;
         this.user = user;
         this.userManager = userManager;
-        this.userGroups = userManager.getUserGroups(user.getUsername()); // Toto je nutné pre Calendar aj Práce
+        this.userGroups = userManager.getUserGroups(user.getUsername()); // pre Kalendár a Práce
 
         setStyle("-fx-background-color:linear-gradient(120deg, #cbaf97 0%, #b4845a 54%, #795d42 100%);");
         setPrefSize(1200, 900);
@@ -31,7 +32,7 @@ public class MainMenu extends BorderPane {
     }
 
     private void createLayout() {
-        // Header v hornej casti - meno/pfp
+        // Header v hornej casti - meno/pfp + zvonček
         HBox header = new HBox(15);
         header.setAlignment(Pos.CENTER_LEFT);
 
@@ -56,8 +57,15 @@ public class MainMenu extends BorderPane {
         ((Label) nameBox.getChildren().get(1)).setTextFill(Color.web("#d84315"));
         ((Label) nameBox.getChildren().get(1)).setStyle("-fx-font-weight:bold;");
 
-        header.getChildren().addAll(pfp, nameBox);
-        header.setPadding(new Insets(23, 0, 16, 38));
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        // Zvonček – existujúci NotificationBell, ktorý už používaš
+        // predpoklad: má konštruktor NotificationBell(Supplier<List<String>>)
+        notificationBell = new NotificationBell(this::getDeadlineNotifications);
+
+        header.getChildren().addAll(pfp, nameBox, spacer, notificationBell);
+        header.setPadding(new Insets(23, 24, 16, 38));
         setTop(header);
 
         // Sidebar menu
@@ -67,7 +75,6 @@ public class MainMenu extends BorderPane {
         sidebar.setStyle("-fx-background-radius:30; -fx-background-color:rgba(180, 132, 90, 0.16);");
         sidebar.setAlignment(Pos.TOP_LEFT);
 
-        // Hlavné menu buttony
         Button skupinyBtn = basicNavBtn("Moje skupiny");
         skupinyBtn.setOnAction(e -> setCenter(new MojeSkupinyPane(user, app, userManager)));
 
@@ -75,7 +82,11 @@ public class MainMenu extends BorderPane {
         praceBtn.setOnAction(e -> setCenter(new MojePracePane(user, userManager)));
 
         Button kalendarBtn = basicNavBtn("Kalendár / Termíny");
-        kalendarBtn.setOnAction(e -> setCenter(new CalendarPane(user, userManager, userGroups)));
+        kalendarBtn.setOnAction(e -> {
+            // pri otvorení kalendára si obnov skupiny zo servera
+            userGroups = userManager.getUserGroups(user.getUsername());
+            setCenter(new CalendarPane(user, userManager, userGroups));
+        });
 
         Button profilBtn = basicNavBtn("Môj profil");
         profilBtn.setOnAction(e -> app.showProfileScreen(user));
@@ -90,11 +101,21 @@ public class MainMenu extends BorderPane {
         sidebar.getChildren().addAll(skupinyBtn, praceBtn, kalendarBtn, profilBtn, odhlasBtn);
         setLeft(sidebar);
 
-        // Defaultne zobraz, čo chceš (napr. skupiny)
+        // Default: moje skupiny
         setCenter(new MojeSkupinyPane(user, app, userManager));
     }
 
-    // Vytvára základný štýlový sidebar button
+    // Ak už NotificationBell vie počítať deadliny z kalendára, môžeš vrátiť prázdny zoznam
+    // alebo implementovať podobne ako v CalendarPane.getDeadlineNotifications()
+    private java.util.List<String> getDeadlineNotifications() {
+        return java.util.Collections.emptyList();
+    }
+
+    // Getter pre MainApp – aby vedel získať zvonček
+    public NotificationBell getNotificationBell() {
+        return notificationBell;
+    }
+
     private Button basicNavBtn(String text) {
         Button btn = new Button(text);
         btn.setFont(Font.font("Arial", 15));

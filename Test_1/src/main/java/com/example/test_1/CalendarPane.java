@@ -230,10 +230,23 @@ public class CalendarPane extends VBox {
         layout.setMinWidth(340);
 
         ComboBox<Group> groupCb = new ComboBox<>();
-        groupCb.getItems().addAll(userGroups);
-        if (editEv!=null)
-            for (Group g:userGroups) if (g.id==editEv.groupId) groupCb.getSelectionModel().select(g);
-            else if (!userGroups.isEmpty()) groupCb.getSelectionModel().selectFirst();
+
+// vždy načítaj aktuálne skupiny zo servera
+        List<Group> groups = userManager.getUserGroups(user.getUsername());
+        groupCb.getItems().setAll(groups);
+
+// predvyber skupinu
+        if (editEv != null) {
+            for (Group g : groups) {
+                if (g.id == editEv.groupId) {
+                    groupCb.getSelectionModel().select(g);
+                    break;
+                }
+            }
+        } else if (!groups.isEmpty()) {
+            groupCb.getSelectionModel().selectFirst();
+        }
+
 
         TextField titleFld = new TextField(editEv==null?"":editEv.title);
         titleFld.setPromptText("Názov termínu");

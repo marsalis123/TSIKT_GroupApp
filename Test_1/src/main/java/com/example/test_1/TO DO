@@ -1,6 +1,4 @@
 //----------------------------------||TO DO||-----------------------------------------\\
-- Notifikácie - selfexplanatory (maybe dorobiť)
-- Štatistiky kto koľko práce urobil (Farbičky by mohli dobre fungovať)
 - Bezpečnosť (kontrola vstupov, hashovanie hesiel, ochrana pred SQL injection)
 
 
@@ -15,3 +13,6 @@ TO DO OPTIONAL:
 - chat / správy   nebude stačiť Feed ??? (Stačil Feed)
 - "Moje práce" (pridávanie, upravovanie a sledovanie stavu úloh (OPEN / IN PROGRESS / DONE).
 - "Termíny" (definovanie deadlinov, pripomienky na blížiace sa úlohy)
+- Štatistiky kto koľko práce urobil (Farbičky by mohli dobre fungovať)
+- Notifikácie - selfexplanatory (maybe dorobiť)
+- Server SpringBoot

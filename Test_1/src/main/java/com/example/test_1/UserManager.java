@@ -423,200 +423,371 @@ public class UserManager {
 
 
     public boolean addJob(Job job) {
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "INSERT INTO jobs (title, description, group_id, status, created_by, assigned_to) VALUES (?, ?, ?, ?, ?, ?)";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setString(1, job.title);
-            pstmt.setString(2, job.description);
-            pstmt.setInt(3, job.groupId);
-            pstmt.setString(4, job.status);
-            pstmt.setInt(5, job.createdBy);
-            pstmt.setInt(6, job.assignedTo);
-            pstmt.executeUpdate();
-            return true;
-        } catch (SQLException e) { e.printStackTrace(); return false; }
+        try {
+            String safeTitle = job.title == null ? "" : job.title.replace("\"", "\\\"");
+            String safeDesc = job.description == null ? "" : job.description.replace("\"", "\\\"");
+
+            String jsonReq = String.format(
+                    "{\"id\":0,\"title\":\"%s\",\"description\":\"%s\",\"groupId\":%d," +
+                            "\"status\":\"%s\",\"createdBy\":%d,\"assignedTo\":%d,\"createdAt\":\"\"}",
+                    safeTitle,
+                    safeDesc,
+                    job.groupId,
+                    job.status.replace("\"", "\\\""),
+                    job.createdBy,
+                    job.assignedTo
+            );
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:8080/api/jobs"))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonReq))
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            return resp.statusCode() == 200;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
     }
 
+
     public boolean updateJobStatus(int jobId, String newStatus) {
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "UPDATE jobs SET status = ? WHERE id = ?";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setString(1, newStatus);
-            pstmt.setInt(2, jobId);
-            pstmt.executeUpdate();
-            return true;
-        } catch (SQLException e) { e.printStackTrace(); return false; }
+        try {
+            String safeStatus = newStatus == null ? "" : newStatus.replace("\"", "\\\"");
+            String url = "http://localhost:8080/api/jobs/" + jobId +
+                    "/status?status=" +
+                    java.net.URLEncoder.encode(safeStatus, java.nio.charset.StandardCharsets.UTF_8);
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .method("PATCH", java.net.http.HttpRequest.BodyPublishers.noBody())
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            return resp.statusCode() == 200;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
     }
+
 
     public List<Job> getUserJobs(int userId) {
         List<Job> jobs = new ArrayList<>();
-        try (Connection conn = DBManager.getConnection()) {
-            // Najskôr zisti zoznam group_id kde je user člen (alebo owner)
-            String sqlGroups = "SELECT g.id FROM groups g "
-                    + "LEFT JOIN group_members gm ON g.id = gm.group_id "
-                    + "WHERE g.owner = (SELECT username FROM users WHERE id = ?) OR gm.user_id = ?";
-            PreparedStatement stmtGroups = conn.prepareStatement(sqlGroups);
-            stmtGroups.setInt(1, userId);
-            stmtGroups.setInt(2, userId);
-            ResultSet rsGroups = stmtGroups.executeQuery();
-            List<Integer> groupIds = new ArrayList<>();
-            while (rsGroups.next()) groupIds.add(rsGroups.getInt(1));
+        try {
+            String url = "http://localhost:8080/api/jobs?userId=" + userId;
 
-            if (groupIds.isEmpty()) return jobs;
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .GET()
+                    .build();
 
-            // Dynamicky priprav zoznam id do SQL
-            String inClause = groupIds.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
-            String sqlJobs = "SELECT * FROM jobs WHERE group_id IN (" + inClause + ")";
-            PreparedStatement stmtJobs = conn.prepareStatement(sqlJobs);
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
 
-            ResultSet rsJobs = stmtJobs.executeQuery();
-            while (rsJobs.next()) {
-                jobs.add(new Job(
-                        rsJobs.getInt("id"),
-                        rsJobs.getString("title"),
-                        rsJobs.getString("description"),
-                        rsJobs.getInt("group_id"),
-                        rsJobs.getString("status"),
-                        rsJobs.getInt("created_by"),
-                        rsJobs.getInt("assigned_to"),
-                        rsJobs.getString("created_at")
-                ));
+            if (resp.statusCode() != 200) return jobs;
+
+            String json = resp.body().trim();
+            if (json.startsWith("[")) json = json.substring(1);
+            if (json.endsWith("]")) json = json.substring(0, json.length()-1);
+            if (json.isBlank()) return jobs;
+
+            String[] items = json.split("\\},\\s*\\{");
+            for (String it : items) {
+                String obj = it;
+                if (!obj.startsWith("{")) obj = "{" + obj;
+                if (!obj.endsWith("}")) obj = obj + "}";
+
+                int id = extractInt(obj, "\"id\":");
+                String title = extractString(obj, "\"title\":\"");
+                String desc = extractString(obj, "\"description\":\"");
+                int groupId = extractInt(obj, "\"groupId\":");
+                String status = extractString(obj, "\"status\":\"");
+                int createdBy = extractInt(obj, "\"createdBy\":");
+                int assignedTo = extractInt(obj, "\"assignedTo\":");
+                String createdAt = extractString(obj, "\"createdAt\":\"");
+
+                jobs.add(new Job(id, title, desc, groupId, status, createdBy, assignedTo, createdAt));
             }
-        } catch (Exception e) { e.printStackTrace(); }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
         return jobs;
     }
 
 
-    public boolean updateJob(int jobId, String newTitle, String newDescription, int newGroupId, String newStatus, int assignedTo) {
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "UPDATE jobs SET title = ?, description = ?, group_id = ?, status = ?, assigned_to = ? WHERE id = ?";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setString(1, newTitle);
-            pstmt.setString(2, newDescription);
-            pstmt.setInt(3, newGroupId);
-            pstmt.setString(4, newStatus);
-            pstmt.setInt(5, assignedTo);
-            pstmt.setInt(6, jobId);
-            pstmt.executeUpdate();
-            return true;
-        } catch (SQLException e) { e.printStackTrace(); return false; }
+
+    public boolean updateJob(int jobId, String newTitle, String newDescription,
+                             int newGroupId, String newStatus, int assignedTo) {
+        try {
+            String safeTitle = newTitle == null ? "" : newTitle.replace("\"", "\\\"");
+            String safeDesc = newDescription == null ? "" : newDescription.replace("\"", "\\\"");
+            String safeStatus = newStatus == null ? "" : newStatus.replace("\"", "\\\"");
+
+            String jsonReq = String.format(
+                    "{\"id\":%d,\"title\":\"%s\",\"description\":\"%s\",\"groupId\":%d," +
+                            "\"status\":\"%s\",\"createdBy\":0,\"assignedTo\":%d,\"createdAt\":\"\"}",
+                    jobId,
+                    safeTitle,
+                    safeDesc,
+                    newGroupId,
+                    safeStatus,
+                    assignedTo
+            );
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:8080/api/jobs/" + jobId))
+                    .header("Content-Type", "application/json")
+                    .PUT(java.net.http.HttpRequest.BodyPublishers.ofString(jsonReq))
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            return resp.statusCode() == 200;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
     }
+
 
     // PRIDA LOG
     public boolean addJobLog(JobLog log) {
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "INSERT INTO job_logs (job_id, user_id, work_text, commit_msg, pdf_path) VALUES (?, ?, ?, ?, ?)";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setInt(1, log.jobId);
-            pstmt.setInt(2, log.userId);
-            pstmt.setString(3, log.workText);
-            pstmt.setString(4, log.commitMsg);
-            pstmt.setString(5, log.pdfPath);
-            pstmt.executeUpdate();
-            return true;
-        } catch (SQLException e) { e.printStackTrace(); return false; }
+        try {
+            String safeWork = log.workText == null ? "" : log.workText.replace("\"", "\\\"");
+            String safeCommit = log.commitMsg == null ? "" : log.commitMsg.replace("\"", "\\\"");
+            String safePdf = log.pdfPath == null ? "" :
+                    log.pdfPath.replace("\\", "\\\\").replace("\"", "\\\"");
+
+            String jsonReq = String.format(
+                    "{\"id\":0,\"jobId\":%d,\"userId\":%d,\"workText\":\"%s\",\"commitMsg\":\"%s\"," +
+                            "\"pdfPath\":\"%s\",\"createdAt\":\"\",\"authorName\":\"\"}",
+                    log.jobId,
+                    log.userId,
+                    safeWork,
+                    safeCommit,
+                    safePdf
+            );
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:8080/api/jobs/logs"))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonReq))
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            return resp.statusCode() == 200;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
     }
 
-    // ČÍTA LOGS (s menom autora)
+
+    // ČÍTA LOGS
     public List<JobLog> getJobLogs(int jobId) {
         List<JobLog> list = new ArrayList<>();
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "SELECT l.*, u.name as authorName FROM job_logs l JOIN users u ON l.user_id = u.id WHERE l.job_id = ? ORDER BY l.created_at ASC";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setInt(1, jobId);
-            ResultSet rs = pstmt.executeQuery();
-            while (rs.next()) {
-                list.add(new JobLog(
-                        rs.getInt("id"),
-                        rs.getInt("job_id"),
-                        rs.getInt("user_id"),
-                        rs.getString("work_text"),
-                        rs.getString("commit_msg"),
-                        rs.getString("pdf_path"),
-                        rs.getString("created_at"),
-                        rs.getString("authorName")
-                ));
+        try {
+            String url = "http://localhost:8080/api/jobs/" + jobId + "/logs";
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .GET()
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (resp.statusCode() != 200) return list;
+
+            String json = resp.body().trim();
+            if (json.startsWith("[")) json = json.substring(1);
+            if (json.endsWith("]")) json = json.substring(0, json.length()-1);
+            if (json.isBlank()) return list;
+
+            String[] items = json.split("\\},\\s*\\{");
+            for (String it : items) {
+                String obj = it;
+                if (!obj.startsWith("{")) obj = "{" + obj;
+                if (!obj.endsWith("}")) obj = obj + "}";
+
+                int id = extractInt(obj, "\"id\":");
+                int jId = extractInt(obj, "\"jobId\":");
+                int userId = extractInt(obj, "\"userId\":");
+                String work = extractString(obj, "\"workText\":\"");
+                String commit = extractString(obj, "\"commitMsg\":\"");
+                String pdf = extractString(obj, "\"pdfPath\":\"");
+                String createdAt = extractString(obj, "\"createdAt\":\"");
+                String author = extractString(obj, "\"authorName\":\"");
+
+                list.add(new JobLog(id, jId, userId, work, commit, pdf, createdAt, author));
             }
-        } catch (SQLException e) { e.printStackTrace(); }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
         return list;
     }
+
 // --------- KALENDÁR ---------
 
     public boolean addCalendarEvent(CalendarEvent e) {
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "INSERT INTO calendar_events (group_id, created_by, title, description, date, color, notify) VALUES (?, ?, ?, ?, ?, ?, ?)";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setInt(1, e.groupId);
-            pstmt.setInt(2, e.createdBy);
-            pstmt.setString(3, e.title);
-            pstmt.setString(4, e.description);
-            pstmt.setString(5, e.date);
-            pstmt.setString(6, e.color);
-            pstmt.setInt(7, e.notify ? 1 : 0);
-            pstmt.executeUpdate();
-            return true;
-        } catch (SQLException ex) { ex.printStackTrace(); return false; }
+        try {
+            String safeTitle = e.title == null ? "" : e.title.replace("\"", "\\\"");
+            String safeDesc = e.description == null ? "" : e.description.replace("\"", "\\\"");
+            String safeColor = e.color == null ? "" : e.color.replace("\"", "\\\"");
+
+            String jsonReq = String.format(
+                    "{\"id\":0,\"groupId\":%d,\"createdBy\":%d," +
+                            "\"title\":\"%s\",\"description\":\"%s\",\"date\":\"%s\"," +
+                            "\"color\":\"%s\",\"notify\":%s,\"createdAt\":\"\"}",
+                    e.groupId,
+                    e.createdBy,
+                    safeTitle,
+                    safeDesc,
+                    e.date,
+                    safeColor,
+                    e.notify ? "true" : "false"
+            );
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("http://localhost:8080/api/calendar"))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonReq))
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            return resp.statusCode() == 200;
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            return false;
+        }
     }
 
-    // Get all events for group and month ("2025-11")
+
+    //Event pre jednu skupinu
     public List<CalendarEvent> getCalendarEvents(int groupId, String yearMonth) {
         List<CalendarEvent> events = new ArrayList<>();
-        try (Connection conn = DBManager.getConnection()) {
-            String sql = "SELECT * FROM calendar_events WHERE group_id = ? AND substr(date, 1, 7) = ?";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setInt(1, groupId);
-            pstmt.setString(2, yearMonth);
-            ResultSet rs = pstmt.executeQuery();
-            while (rs.next()) {
-                events.add(new CalendarEvent(
-                        rs.getInt("id"),
-                        rs.getInt("group_id"),
-                        rs.getInt("created_by"),
-                        rs.getString("title"),
-                        rs.getString("description"),
-                        rs.getString("date"),
-                        rs.getString("color"),
-                        rs.getInt("notify") != 0,
-                        rs.getString("created_at")
-                ));
+        try {
+            String url = "http://localhost:8080/api/calendar/group?groupId=" + groupId +
+                    "&yearMonth=" + java.net.URLEncoder.encode(yearMonth, java.nio.charset.StandardCharsets.UTF_8);
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .GET()
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (resp.statusCode() != 200) return events;
+
+            String json = resp.body().trim();
+            if (json.startsWith("[")) json = json.substring(1);
+            if (json.endsWith("]")) json = json.substring(0, json.length()-1);
+            if (json.isBlank()) return events;
+
+            String[] items = json.split("\\},\\s*\\{");
+            for (String it : items) {
+                String obj = it;
+                if (!obj.startsWith("{")) obj = "{" + obj;
+                if (!obj.endsWith("}")) obj = obj + "}";
+
+                int id = extractInt(obj, "\"id\":");
+                int gId = extractInt(obj, "\"groupId\":");
+                int createdBy = extractInt(obj, "\"createdBy\":");
+                String title = extractString(obj, "\"title\":\"");
+                String desc = extractString(obj, "\"description\":\"");
+                String date = extractString(obj, "\"date\":\"");
+                String color = extractString(obj, "\"color\":\"");
+                boolean notify = "true".equalsIgnoreCase(extractString(obj, "\"notify\":").replace("\"",""));
+
+                String createdAt = extractString(obj, "\"createdAt\":\"");
+
+                events.add(new CalendarEvent(id, gId, createdBy, title, desc, date, color, notify, createdAt));
             }
-        } catch (SQLException ex) { ex.printStackTrace(); }
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
         return events;
     }
 
-    // Get all events for ALL user's groups for a month
-    public List<CalendarEvent> getCalendarEventsForUsersGroups(List<Group> userGroups, java.time.YearMonth month) {
+
+    //Všetky eventy pre všetky skupiny
+    public List<CalendarEvent> getCalendarEventsForUsersGroups(List<Group> userGroups,
+                                                               java.time.YearMonth month) {
         List<CalendarEvent> events = new ArrayList<>();
-        try (Connection conn = DBManager.getConnection()) {
-            if (userGroups == null || userGroups.isEmpty()) return events;
-            StringBuilder sb = new StringBuilder();
-            sb.append("SELECT * FROM calendar_events WHERE (");
-            for (int i=0;i<userGroups.size();i++) {
-                sb.append("group_id=?");
-                if (i < userGroups.size()-1) sb.append(" OR ");
+        if (userGroups == null || userGroups.isEmpty()) return events;
+
+        try {
+            String yearMonth = month.toString(); // "2025-12"
+            String groupIds = userGroups.stream()
+                    .map(g -> String.valueOf(g.id))
+                    .collect(java.util.stream.Collectors.joining(","));
+
+            String url = "http://localhost:8080/api/calendar/user?yearMonth=" +
+                    java.net.URLEncoder.encode(yearMonth, java.nio.charset.StandardCharsets.UTF_8) +
+                    "&groupIds=" +
+                    java.net.URLEncoder.encode(groupIds, java.nio.charset.StandardCharsets.UTF_8);
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .GET()
+                    .build();
+
+            java.net.http.HttpResponse<String> resp =
+                    client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (resp.statusCode() != 200) return events;
+
+            String json = resp.body().trim();
+            if (json.startsWith("[")) json = json.substring(1);
+            if (json.endsWith("]")) json = json.substring(0, json.length()-1);
+            if (json.isBlank()) return events;
+
+            String[] items = json.split("\\},\\s*\\{");
+            for (String it : items) {
+                String obj = it;
+                if (!obj.startsWith("{")) obj = "{" + obj;
+                if (!obj.endsWith("}")) obj = obj + "}";
+
+                int id = extractInt(obj, "\"id\":");
+                int gId = extractInt(obj, "\"groupId\":");
+                int createdBy = extractInt(obj, "\"createdBy\":");
+                String title = extractString(obj, "\"title\":\"");
+                String desc = extractString(obj, "\"description\":\"");
+                String date = extractString(obj, "\"date\":\"");
+                String color = extractString(obj, "\"color\":\"");
+                boolean notify = "true".equalsIgnoreCase(extractString(obj, "\"notify\":").replace("\"",""));
+                String createdAt = extractString(obj, "\"createdAt\":\"");
+
+                events.add(new CalendarEvent(id, gId, createdBy, title, desc, date, color, notify, createdAt));
             }
-            sb.append(") AND substr(date, 1, 7) = ?");
-            PreparedStatement ps = conn.prepareStatement(sb.toString());
-            for (int i=0; i<userGroups.size();i++)
-                ps.setInt(i+1, userGroups.get(i).id);
-            ps.setString(userGroups.size()+1, month.toString());
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                events.add(new CalendarEvent(
-                        rs.getInt("id"),
-                        rs.getInt("group_id"),
-                        rs.getInt("created_by"),
-                        rs.getString("title"),
-                        rs.getString("description"),
-                        rs.getString("date"),
-                        rs.getString("color"),
-                        rs.getInt("notify") != 0,
-                        rs.getString("created_at")
-                ));
-            }
-        } catch (Exception e) { e.printStackTrace(); }
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
         return events;
     }
+
 
     private int extractInt(String json, String key) {
         int idx = json.indexOf(key);

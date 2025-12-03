@@ -69,17 +69,30 @@ public class MojeSkupinyPane extends BorderPane {
                 + "-fx-background-radius: 45;"
                 + "-fx-effect: dropshadow(gaussian, #ffd19c, 24, 0.14, 0, 8);");
 
+        // horný riadok: titulok + plus
         Label groupsTitle = new Label("Moje skupiny");
         groupsTitle.setFont(Font.font("Arial", 27));
         groupsTitle.setTextFill(Color.web("#d84315"));
-        groupsTitle.setStyle("-fx-font-weight: bold; -fx-padding:0 0 18 0;");
+        groupsTitle.setStyle("-fx-font-weight: bold;");
+
+        Button addGroupBtn = new Button("+");
+        addGroupBtn.setFont(Font.font("Arial", 20));
+        addGroupBtn.setStyle("-fx-background-radius:20; -fx-background-color:#ffd19c; -fx-text-fill:#d84315;");
+        addGroupBtn.setOnAction(e -> showCreateGroupDialog());
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        HBox headerRow = new HBox(10, groupsTitle, spacer, addGroupBtn);
+        headerRow.setAlignment(Pos.CENTER_LEFT);
+        headerRow.setPadding(new Insets(0, 0, 8, 0));
 
         ListView<Group> groupListView = new ListView<>();
         groupListView.getItems().addAll(userGroups);
         groupListView.setStyle("-fx-background-radius:34; -fx-background-color:rgba(255,255,255,0.38)");
         groupListView.setPrefHeight(340);
 
-        listBox.getChildren().addAll(groupsTitle, groupListView);
+        listBox.getChildren().addAll(headerRow, groupListView);
         setCenter(listBox);
 
         groupListView.setOnMouseClicked(e -> {
@@ -89,6 +102,7 @@ public class MojeSkupinyPane extends BorderPane {
             }
         });
     }
+
 
     private void showGroupDetail(Group group) {
         setCenter(null);
