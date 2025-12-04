@@ -77,11 +77,24 @@ public class LoginScreen {
         );
 
         loginButton.setOnAction(e -> {
-            String username = usernameField.getText();
+            String username = usernameField.getText().trim();
             String password = passwordField.getText();
 
-            if (username.isEmpty() || password.isEmpty()) {
-                messageLabel.setText("Vyplňte všetky polia!");
+            StringBuilder errors = new StringBuilder();
+
+            if (username.isEmpty()) {
+                errors.append("Používateľské meno je povinné.\n");
+            } else if (username.length() < 3) {
+                errors.append("Používateľské meno musí mať aspoň 3 znaky.\n");
+            }
+
+            if (password.isEmpty()) {
+                errors.append("Heslo je povinné.\n");
+            }
+
+            if (errors.length() > 0) {
+                messageLabel.setTextFill(textStrong);
+                messageLabel.setText(errors.toString());
                 return;
             }
 
@@ -89,16 +102,51 @@ public class LoginScreen {
             if (user != null) {
                 app.showMainMenu(user);
             } else {
+                messageLabel.setTextFill(textStrong);
                 messageLabel.setText("Nesprávne prihlasovacie údaje!");
             }
         });
 
+
         registerButton.setOnAction(e -> {
-            String username = usernameField.getText();
+            String username = usernameField.getText().trim();
             String password = passwordField.getText();
 
-            if (username.isEmpty() || password.isEmpty()) {
-                messageLabel.setText("Vyplňte všetky polia!");
+            StringBuilder errors = new StringBuilder();
+
+            // username pravidlá
+            if (username.isEmpty()) {
+                errors.append("Používateľské meno je povinné.\n");
+            } else {
+                if (username.length() < 3) {
+                    errors.append("Používateľské meno musí mať aspoň 3 znaky.\n");
+                }
+                if (!username.matches("^[A-Za-z0-9_]+$")) {
+                    errors.append("Používateľské meno môže obsahovať len písmená, čísla a _.\n");
+                }
+            }
+
+            // password pravidlá
+            if (password.isEmpty()) {
+                errors.append("Heslo je povinné.\n");
+            } else {
+                if (password.length() < 8) {
+                    errors.append("Heslo musí mať aspoň 8 znakov.\n");
+                }
+                if (!password.matches(".*[0-9].*")) {
+                    errors.append("Heslo musí obsahovať aspoň jedno číslo.\n");
+                }
+                if (!password.matches(".*[A-Z].*")) {
+                    errors.append("Heslo musí obsahovať aspoň jedno veľké písmeno.\n");
+                }
+                if (!password.matches(".*[a-z].*")) {
+                    errors.append("Heslo musí obsahovať aspoň jedno malé písmeno.\n");
+                }
+            }
+
+            if (errors.length() > 0) {
+                messageLabel.setTextFill(textStrong);
+                messageLabel.setText(errors.toString());
                 return;
             }
 
@@ -112,6 +160,7 @@ public class LoginScreen {
                 messageLabel.setText("Používateľ už existuje!");
             }
         });
+
 
         buttonBox.getChildren().addAll(loginButton, registerButton);
         view.getChildren().addAll(titleLabel, usernameField, passwordField, buttonBox, messageLabel);

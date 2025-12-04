@@ -10,25 +10,29 @@ import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import java.util.List;
 
-public class MainMenu extends BorderPane {
+public class MainMenu extends BorderPane implements NotificationWebSocketClient.Listener {
+
     private final MainApp app;
     private final User user;
     private final UserManager userManager;
     private List<Group> userGroups;
-
-    // Zvonček pre notifikácie
     private NotificationBell notificationBell;
+
+    private NotificationWebSocketClient wsClient;   // <= nový field
 
     public MainMenu(MainApp app, User user, UserManager userManager) {
         this.app = app;
         this.user = user;
         this.userManager = userManager;
-        this.userGroups = userManager.getUserGroups(user.getUsername()); // pre Kalendár a Práce
+        this.userGroups = userManager.getUserGroups(user.getUsername());
 
         setStyle("-fx-background-color:linear-gradient(120deg, #cbaf97 0%, #b4845a 54%, #795d42 100%);");
         setPrefSize(1200, 900);
 
         createLayout();
+
+        // spusti WebSocket až keď je layout hotový
+        wsClient = new NotificationWebSocketClient(this);
     }
 
     private void createLayout() {
@@ -135,4 +139,22 @@ public class MainMenu extends BorderPane {
         ));
         return btn;
     }
+
+    @Override
+    public void onNotification(String type, String message, int groupId) {
+        System.out.println("MAIN MENU NOTIF: type=" + type + ", msg=" + message + ", groupId=" + groupId);
+
+        javafx.application.Platform.runLater(() -> {
+            // Ak máš v NotificationBell metódu na pridanie notifikácie:
+            // napr. notificationBell.addNotification(message);
+
+          // prispôsob podľa svojej API
+
+            // môžeš tiež ukázať InfoAlert:
+            // Alert alert = new Alert(Alert.AlertType.INFORMATION, message);
+            // alert.setHeaderText("Nová notifikácia (" + type + ")");
+            // alert.show();
+        });
+    }
+
 }
